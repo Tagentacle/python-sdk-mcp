@@ -10,6 +10,9 @@ dependencies = [
     "anyio>=4.0",
 ]
 
+[tool.uv.sources]
+tagentacle-py-core = { path = "../python-sdk-core", editable = true }
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
