@@ -1,0 +1,15 @@
+[project]
+name = "tagentacle-py-mcp"
+version = "0.1.0"
+description = "Tagentacle MCP Integration — Transport layer and built-in MCP Server for the Tagentacle bus"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "tagentacle-py-core>=0.1.0",
+    "mcp>=1.0",
+    "anyio>=4.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

@@ -1,0 +1,13 @@
+[package]
+name = "tagentacle_py_mcp"
+version = "0.1.0"
+description = "Tagentacle MCP Integration — Transport layer and built-in MCP Server for the Tagentacle bus"
+authors = ["Tagentacle Contributors"]
+type = "executable"
+
+[entry_points]
+node = "tagentacle_py_mcp.server:main"
+
+[dependencies]
+tagentacle = ["tagentacle_py_core"]
+python = ["tagentacle-py-core", "mcp", "anyio"]
