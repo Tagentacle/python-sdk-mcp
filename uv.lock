@@ -700,7 +700,7 @@ wheels = [
 [[package]]
 name = "tagentacle-py-core"
 version = "0.1.0"
-source = { editable = "../python-sdk-core" }
+source = { git = "https://github.com/Tagentacle/python-sdk-core.git?branch=main#f0c9e6e4240f7291ce55e690e6a6d881621778e7" }
 
 [[package]]
 name = "tagentacle-py-mcp"
@@ -716,7 +716,7 @@ dependencies = [
 requires-dist = [
     { name = "anyio", specifier = ">=4.0" },
     { name = "mcp", specifier = ">=1.0" },
-    { name = "tagentacle-py-core", editable = "../python-sdk-core" },
+    { name = "tagentacle-py-core", git = "https://github.com/Tagentacle/python-sdk-core.git?branch=main" },
 ]
 
 [[package]]
