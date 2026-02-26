@@ -6,7 +6,7 @@ authors = ["Tagentacle Contributors"]
 type = "executable"
 
 [entry_points]
-node = "tagentacle_py_mcp.server:main"
+node = "server_node:main"
 
 [dependencies]
 tagentacle = ["tagentacle_py_core"]

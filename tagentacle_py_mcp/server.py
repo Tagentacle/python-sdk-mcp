@@ -227,20 +227,3 @@ class TagentacleMCPServer:
             )
 
 
-async def main():
-    """Standalone entrypoint for the Tagentacle MCP Server."""
-    import sys
-
-    logging.basicConfig(level=logging.INFO)
-
-    allowed = None
-    if len(sys.argv) > 1:
-        allowed = sys.argv[1:]
-        logger.info(f"Topic allow-list: {allowed}")
-
-    server = TagentacleMCPServer(allowed_topics=allowed)
-    await server.run()
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
