@@ -1,81 +1,234 @@
 """
-Tagentacle MCP Server: Built-in MCP Server exposing all bus interactions as MCP Tools.
+Tagentacle MCP Server SDK — MCPServerNode base class and TagentacleMCPServer.
 
-This node acts as the AI Agent's interface to the Tagentacle bus, wrapping
-core bus primitives (publish, subscribe, service calls, introspection) into
-standard MCP Tool calls.  Agents interact with the entire bus through this
-single MCP Server without needing to know the bus protocol.
+This module provides:
+  - MCPServerNode: Abstract base class for building MCP Server Nodes in a
+    Tagentacle workspace. Inherits LifecycleNode and runs a FastMCP
+    Streamable HTTP server, publishing its URL to /mcp/directory on activation.
+  - TagentacleMCPServer: Built-in MCP Server that exposes Tagentacle bus
+    operations (publish, subscribe, call_service, introspection) as MCP Tools.
 
-Powered by the official Anthropic MCP SDK (``FastMCP``).  Tool schemas are
-auto-generated from Python type-hints — no hand-written JSON-Schema needed.
+Architecture (post-refactor):
+  - MCP Server Nodes run their own HTTP endpoint (Streamable HTTP transport).
+  - Agent Nodes discover servers via /mcp/directory Topic and connect using
+    the native MCP SDK HTTP client — no bus-as-transport intermediary.
+  - This enables full MCP protocol support including server→client sampling.
 
-Usage:
-    server = TagentacleMCPServer("bus_tools_node", allowed_topics=["/alerts", "/logs"])
-    await server.run()
+Usage (custom MCP Server Node):
+    class WeatherServer(MCPServerNode):
+        def __init__(self):
+            super().__init__("weather_server", mcp_port=8100)
 
-    # Or as a CLI entrypoint (via tagentacle.toml entry_points):
-    python -m tagentacle_py_mcp.server
+        def on_configure(self, config):
+            super().on_configure(config)
+
+            @self.mcp.tool(description="Get weather for a city")
+            def get_weather(city: str) -> str:
+                return f"Sunny in {city}"
+
+    async def main():
+        node = WeatherServer()
+        await node.bringup()
+        await node.spin()
 """
 
 import asyncio
 import json
 import logging
-from typing import Annotated, Any, Dict, List, Optional
+from typing import Any, Annotated, Dict, List, Optional
 
+import uvicorn
 from mcp.server.fastmcp import FastMCP
 from pydantic import Field
-from tagentacle_py_core import Node
-
-from tagentacle_py_mcp.transport import tagentacle_server_transport
+from tagentacle_py_core import LifecycleNode
 
 logger = logging.getLogger("tagentacle.mcp.server")
 
+# Standard topic for MCP server discovery
+MCP_DIRECTORY_TOPIC = "/mcp/directory"
 
-class TagentacleMCPServer:
-    """Built-in MCP Server Node exposing all bus interactions as MCP Tools.
 
-    Uses ``FastMCP`` for tool registration and JSON-RPC protocol handling,
-    with ``tagentacle_server_transport`` bridging MCP sessions over the
-    Tagentacle bus.
+class MCPServerNode(LifecycleNode):
+    """Abstract base class for MCP Server Nodes in a Tagentacle workspace.
+
+    Provides:
+      - A FastMCP instance for tool/resource/prompt registration.
+      - Automatic Streamable HTTP server startup on activation.
+      - Automatic /mcp/directory Topic publishing for server discovery.
+
+    Subclasses should register MCP tools in on_configure() using self.mcp
+    (the FastMCP instance), then call super().on_configure(config).
+
+    Constructor Args:
+        node_id: Tagentacle Node ID for bus communication.
+        mcp_name: Human-readable name for the MCP server (default: node_id).
+        mcp_port: HTTP port for the Streamable HTTP endpoint.
+        mcp_host: HTTP host to bind to (default: "127.0.0.1").
+        mcp_path: URL path for the MCP endpoint (default: "/mcp").
+        concurrent_sessions: Whether this server supports concurrent sessions.
+        description: Human-readable description of this server.
+    """
+
+    def __init__(
+        self,
+        node_id: str,
+        *,
+        mcp_name: Optional[str] = None,
+        mcp_port: int = 8000,
+        mcp_host: str = "127.0.0.1",
+        mcp_path: str = "/mcp",
+        concurrent_sessions: bool = True,
+        description: str = "",
+    ):
+        super().__init__(node_id)
+        self._mcp_port = mcp_port
+        self._mcp_host = mcp_host
+        self._mcp_path = mcp_path
+        self._concurrent_sessions = concurrent_sessions
+        self._server_description = description
+        self._uvicorn_server: Optional[uvicorn.Server] = None
+        self._http_task: Optional[asyncio.Task] = None
+
+        # Create FastMCP instance — subclasses register tools on this
+        self.mcp = FastMCP(
+            name=mcp_name or node_id,
+            host=mcp_host,
+            port=mcp_port,
+            streamable_http_path=mcp_path,
+        )
+
+    @property
+    def mcp_url(self) -> str:
+        """The full URL of this server's MCP endpoint."""
+        return f"http://{self._mcp_host}:{self._mcp_port}{self._mcp_path}"
+
+    def on_configure(self, config: Dict[str, Any]):
+        """Configure the MCP Server Node.
+
+        Reads mcp_port/mcp_host from bringup config if provided,
+        overriding constructor defaults. Subclasses should register
+        tools BEFORE calling super().on_configure(config).
+        """
+        if "mcp_port" in config:
+            self._mcp_port = int(config["mcp_port"])
+            self.mcp.settings.port = self._mcp_port
+        if "mcp_host" in config:
+            self._mcp_host = config["mcp_host"]
+            self.mcp.settings.host = self._mcp_host
+
+    async def on_activate(self):
+        """Start the Streamable HTTP server and publish to /mcp/directory."""
+        # Start uvicorn in a background task
+        starlette_app = self.mcp.streamable_http_app()
+        config = uvicorn.Config(
+            starlette_app,
+            host=self._mcp_host,
+            port=self._mcp_port,
+            log_level="warning",
+        )
+        self._uvicorn_server = uvicorn.Server(config)
+        self._http_task = asyncio.create_task(self._uvicorn_server.serve())
+
+        # Give uvicorn a moment to bind
+        await asyncio.sleep(0.3)
+
+        # Publish server description to /mcp/directory
+        await self._publish_directory("available")
+        logger.info(
+            f"MCP Server '{self.node_id}' active at {self.mcp_url}"
+        )
+
+    async def on_deactivate(self):
+        """Stop the HTTP server and publish unavailable status."""
+        await self._publish_directory("unavailable")
+        if self._uvicorn_server:
+            self._uvicorn_server.should_exit = True
+        if self._http_task:
+            try:
+                await asyncio.wait_for(self._http_task, timeout=5.0)
+            except (asyncio.TimeoutError, asyncio.CancelledError):
+                self._http_task.cancel()
+        logger.info(f"MCP Server '{self.node_id}' deactivated.")
+
+    async def on_shutdown(self):
+        """Ensure HTTP server is stopped on shutdown."""
+        if self._uvicorn_server and self._http_task and not self._http_task.done():
+            self._uvicorn_server.should_exit = True
+            try:
+                await asyncio.wait_for(self._http_task, timeout=3.0)
+            except (asyncio.TimeoutError, asyncio.CancelledError):
+                self._http_task.cancel()
+
+    async def _publish_directory(self, status: str):
+        """Publish MCPServerDescription to /mcp/directory Topic."""
+        # Gather tool names if available
+        tools_summary = []
+        try:
+            # FastMCP stores tools internally
+            tools_summary = list(self.mcp._tool_manager._tools.keys())
+        except Exception:
+            pass
+
+        description = {
+            "server_id": self.node_id,
+            "url": self.mcp_url,
+            "transport": "streamable-http",
+            "concurrent_sessions": self._concurrent_sessions,
+            "status": status,
+            "source": "node",
+            "tools_summary": tools_summary,
+            "description": self._server_description,
+            "publisher_node_id": self.node_id,
+        }
+        try:
+            await self.publish(MCP_DIRECTORY_TOPIC, description)
+        except Exception as e:
+            logger.warning(f"Failed to publish to {MCP_DIRECTORY_TOPIC}: {e}")
+
+
+class TagentacleMCPServer(MCPServerNode):
+    """Built-in MCP Server Node exposing Tagentacle bus operations as MCP Tools.
+
+    Provides 10 MCP tools for bus interaction:
+      - publish_to_topic, subscribe_topic, unsubscribe_topic
+      - list_nodes, list_topics, list_services
+      - get_node_info, describe_topic_schema
+      - call_bus_service, ping_daemon
+
+    This allows AI Agents to interact with the entire Tagentacle bus through
+    standard MCP tool calls, without needing direct bus protocol knowledge.
     """
 
     def __init__(
         self,
         node_id: str = "tagentacle_mcp_server",
+        *,
+        mcp_port: int = 8000,
         allowed_topics: Optional[List[str]] = None,
     ):
-        """
-        Args:
-            node_id: Node ID for this server on the Tagentacle bus.
-            allowed_topics: If set, only allow publishing to these topic prefixes.
-                           If None, all topics are allowed.
-        """
-        self.node = Node(node_id)
+        super().__init__(
+            node_id,
+            mcp_name="tagentacle-mcp-server",
+            mcp_port=mcp_port,
+            description="Built-in MCP Server exposing Tagentacle bus operations as tools.",
+        )
         self.allowed_topics = allowed_topics
         self._subscribed_topics: Dict[str, List[Dict[str, Any]]] = {}
-
-        self.mcp = FastMCP(
-            name="tagentacle-mcp-server",
-            instructions=(
-                "Tagentacle bus interaction server.  Use these tools to publish "
-                "messages, subscribe to topics, call services, and introspect "
-                "the running system."
-            ),
+        self.mcp.instructions = (
+            "Tagentacle bus interaction server. Use these tools to publish "
+            "messages, subscribe to topics, call services, and introspect "
+            "the running system."
         )
-        self._register_tools()
+        self._register_bus_tools()
 
-    # ------------------------------------------------------------------
-    # Tool registration  (schemas derived from type-hints automatically)
-    # ------------------------------------------------------------------
-
-    def _register_tools(self) -> None:  # noqa: C901 — intentionally flat
-        """Register all bus interaction tools with ``FastMCP``."""
+    def _register_bus_tools(self) -> None:
+        """Register all bus interaction tools with FastMCP."""
 
         # --- pub / sub ---
 
         @self.mcp.tool(
             description=(
-                "Publish a JSON message to a Tagentacle bus Topic.  "
+                "Publish a JSON message to a Tagentacle bus Topic. "
                 "Other nodes subscribed to that topic will receive the message."
             ),
         )
@@ -88,7 +241,7 @@ class TagentacleMCPServer:
                     raise ValueError(
                         f"Topic '{topic}' not in allow-list: {self.allowed_topics}"
                     )
-            await self.node.publish(topic, payload)
+            await self.publish(topic, payload)
             return f"Published to '{topic}' successfully."
 
         @self.mcp.tool(
@@ -106,7 +259,7 @@ class TagentacleMCPServer:
 
             self._subscribed_topics[topic] = []
 
-            @self.node.subscribe(topic)
+            @self.subscribe(topic)
             async def _on_message(msg):
                 self._subscribed_topics.setdefault(topic, []).append({
                     "sender": msg.get("sender"),
@@ -124,7 +277,7 @@ class TagentacleMCPServer:
             if topic not in self._subscribed_topics:
                 return f"Not subscribed to '{topic}'."
             count = len(self._subscribed_topics.pop(topic, []))
-            self.node.subscribers.pop(topic, None)
+            self.subscribers.pop(topic, None)
             return f"Unsubscribed from '{topic}'. Cleared {count} buffered message(s)."
 
         # --- introspection ---
@@ -159,7 +312,7 @@ class TagentacleMCPServer:
 
         @self.mcp.tool(
             description=(
-                "Get the JSON Schema definition for a Topic's message format.  "
+                "Get the JSON Schema definition for a Topic's message format. "
                 "Useful for understanding payload structure before publishing."
             ),
         )
@@ -181,7 +334,7 @@ class TagentacleMCPServer:
             timeout: Annotated[float, Field(description="Timeout in seconds")] = 30.0,
         ) -> str:
             try:
-                result = await self.node.call_service(service, payload, timeout=timeout)
+                result = await self.call_service(service, payload, timeout=timeout)
                 return json.dumps(result, ensure_ascii=False, indent=2)
             except asyncio.TimeoutError:
                 return f"Error: Service '{service}' did not respond within {timeout}s."
@@ -194,36 +347,16 @@ class TagentacleMCPServer:
         async def ping_daemon() -> str:
             return await self._daemon_query("/tagentacle/ping", timeout=5.0)
 
-    # ------------------------------------------------------------------
-    # Helpers
-    # ------------------------------------------------------------------
-
     async def _daemon_query(
         self, service: str, payload: Optional[dict] = None, *, timeout: float = 10.0
     ) -> str:
         """Call a Daemon introspection service and return pretty-printed JSON."""
         try:
-            result = await self.node.call_service(
+            result = await self.call_service(
                 service, payload or {}, timeout=timeout
             )
             return json.dumps(result, ensure_ascii=False, indent=2)
         except asyncio.TimeoutError:
             return f"Error: Daemon did not respond to {service} (timeout)."
-
-    # ------------------------------------------------------------------
-    # Lifecycle
-    # ------------------------------------------------------------------
-
-    async def run(self) -> None:
-        """Connect to bus and run the MCP server over bus transport (blocking)."""
-        await self.node.connect()
-        logger.info("Tagentacle MCP Server starting on bus …")
-
-        async with tagentacle_server_transport(self.node) as (read_stream, write_stream):
-            await self.mcp._mcp_server.run(
-                read_stream,
-                write_stream,
-                self.mcp._mcp_server.create_initialization_options(),
-            )
 
 

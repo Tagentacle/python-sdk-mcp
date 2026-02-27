@@ -1,13 +1,15 @@
 [project]
 name = "tagentacle-py-mcp"
-version = "0.1.0"
-description = "Tagentacle MCP Integration — Transport layer and built-in MCP Server for the Tagentacle bus"
+version = "0.2.0"
+description = "Tagentacle MCP Integration — MCPServerNode base class with Streamable HTTP transport and /mcp/directory discovery"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "tagentacle-py-core>=0.1.0",
-    "mcp>=1.0",
+    "mcp>=1.8",
     "anyio>=4.0",
+    "uvicorn>=0.20",
+    "starlette",
 ]
 
 [tool.uv.sources]

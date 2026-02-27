@@ -1,25 +1,21 @@
 """
-Tagentacle MCP Integration: Transport layer and built-in MCP Server.
+Tagentacle MCP Integration: MCPServerNode base class and built-in bus tools server.
 
 This package provides:
-  - Transport adapters that bridge MCP JSON-RPC sessions over the Tagentacle bus.
-  - TagentacleMCPServer: built-in executable node exposing all bus interactions as MCP Tools.
+  - MCPServerNode: Abstract base class for MCP Server Nodes that run a
+    Streamable HTTP endpoint and publish to /mcp/directory for discovery.
+  - TagentacleMCPServer: Built-in MCP Server exposing bus operations as MCP Tools.
+  - MCP_DIRECTORY_TOPIC: Standard topic name for MCP server discovery.
 """
 
-from tagentacle_py_mcp.transport import (
-    tagentacle_client_transport,
-    tagentacle_server_transport,
-    TagentacleClientTransport,
-    TagentacleServerTransport,
-    MCP_TRAFFIC_TOPIC,
+from tagentacle_py_mcp.server import (
+    MCPServerNode,
+    TagentacleMCPServer,
+    MCP_DIRECTORY_TOPIC,
 )
-from tagentacle_py_mcp.server import TagentacleMCPServer
 
 __all__ = [
-    "tagentacle_client_transport",
-    "tagentacle_server_transport",
-    "TagentacleClientTransport",
-    "TagentacleServerTransport",
+    "MCPServerNode",
     "TagentacleMCPServer",
-    "MCP_TRAFFIC_TOPIC",
+    "MCP_DIRECTORY_TOPIC",
 ]
