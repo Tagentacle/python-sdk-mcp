@@ -1,12 +1,12 @@
 # Tagentacle MCP 集成
 
-> **The ROS of AI Agents** — Tagentacle 消息总线的 MCP 传输层和内置 MCP Server。
+> **The ROS of AI Agents** — MCPServerNode 基类及内置 MCP Server。
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 
 `tagentacle-py-mcp` 为 Tagentacle 消息总线提供 MCP（Model Context Protocol）集成：
 
-- **传输层适配器** — 将 MCP JSON-RPC 会话桥接到 Tagentacle 总线（`tagentacle_client_transport`、`tagentacle_server_transport`）。
+- **MCPServerNode** — MCP Server Node 基类。运行 Streamable HTTP，自动发布到 `/mcp/directory`。
 - **TagentacleMCPServer** — 内置可执行节点，将所有总线交互能力暴露为 MCP Tool。
 
 ## 安装
@@ -15,45 +15,45 @@
 pip install tagentacle-py-mcp
 ```
 
-自动安装 `tagentacle-py-core` 作为依赖。
+自动安装 `tagentacle-py-core`、`uvicorn`、`starlette`、`mcp` 作为依赖。
 
-## 传输层适配器（Library）
+## MCPServerNode（基类）
 
-### 客户端传输（Agent → MCP Server）
-
-```python
-from tagentacle_py_core import Node
-from tagentacle_py_mcp import tagentacle_client_transport
-from mcp import ClientSession
-
-node = Node("agent_node")
-await node.connect()
-spin_task = asyncio.create_task(node.spin())
-
-async with tagentacle_client_transport(node, "mcp_server_node") as (read, write):
-    async with ClientSession(read, write) as session:
-        await session.initialize()
-        tools = await session.list_tools()
-        result = await session.call_tool("get_weather", {"city": "Tokyo"})
-```
-
-### 服务端传输（MCP Server 挂载到总线）
+继承 `MCPServerNode` 构建自有 MCP Server Node：
 
 ```python
-from tagentacle_py_core import Node
-from tagentacle_py_mcp import tagentacle_server_transport
-from mcp.server.lowlevel import Server
+from tagentacle_py_mcp import MCPServerNode
 
-mcp_server = Server("my-server")
-# ... 使用 @mcp_server.call_tool() 注册工具 ...
+class WeatherServer(MCPServerNode):
+    def __init__(self):
+        super().__init__("weather_server", mcp_port=8100)
 
-node = Node("mcp_server_node")
-await node.connect()
-spin_task = asyncio.create_task(node.spin())
+    def on_configure(self, config):
+        super().on_configure(config)
 
-async with tagentacle_server_transport(node) as (read, write):
-    await mcp_server.run(read, write, mcp_server.create_initialization_options())
+        @self.mcp.tool(description="获取城市天气")
+        def get_weather(city: str) -> str:
+            return f"{city}: 晴天"
+
+async def main():
+    node = WeatherServer()
+    await node.bringup()
+    await node.spin()
+
+asyncio.run(main())
 ```
+
+节点激活时：
+1. 通过 uvicorn 启动 Streamable HTTP 服务器
+2. 向 `/mcp/directory` Topic 发布 `MCPServerDescription`
+3. Agent 节点通过原生 MCP SDK HTTP 客户端发现并连接
+
+### 配置
+
+| 来源 | 键 | 默认值 |
+|------|-----|--------|
+| 构造函数 | `mcp_host` / `mcp_port` | `"0.0.0.0"` / `8000` |
+| 环境变量 | `MCP_HOST` / `MCP_PORT` | 覆盖构造函数 |
 
 ## TagentacleMCPServer（可执行节点）
 
@@ -63,7 +63,8 @@ async with tagentacle_server_transport(node) as (read, write):
 from tagentacle_py_mcp import TagentacleMCPServer
 
 server = TagentacleMCPServer("bus_tools_node", allowed_topics=["/alerts", "/logs"])
-await server.run()
+await server.bringup()
+await server.spin()
 ```
 
 ### 暴露的 MCP Tool
@@ -86,7 +87,7 @@ await server.run()
 这是一个 Tagentacle **executable pkg**（`tagentacle.toml` 中 `type = "executable"`），同时包含 library 组件。
 
 - **Executable**：`TagentacleMCPServer` 节点（入口：`tagentacle_py_mcp.server:main`）
-- **Library**：传输层适配器，可被其他 pkg import
+- **Library**：`MCPServerNode` 基类，可被其他 pkg import
 
 依赖：`[dependencies] tagentacle = ["tagentacle_py_core"]`
 
