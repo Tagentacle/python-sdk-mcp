@@ -704,20 +704,25 @@ source = { editable = "../python-sdk-core" }
 
 [[package]]
 name = "tagentacle-py-mcp"
-version = "0.1.0"
+version = "0.3.0"
 source = { editable = "." }
 dependencies = [
     { name = "anyio" },
     { name = "mcp" },
+    { name = "starlette" },
     { name = "tagentacle-py-core" },
+    { name = "uvicorn" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "anyio", specifier = ">=4.0" },
-    { name = "mcp", specifier = ">=1.0" },
+    { name = "mcp", specifier = ">=1.8" },
+    { name = "starlette" },
     { name = "tagentacle-py-core", editable = "../python-sdk-core" },
+    { name = "uvicorn", specifier = ">=0.20" },
 ]
+provides-extras = ["permission"]
 
 [[package]]
 name = "typing-extensions"
