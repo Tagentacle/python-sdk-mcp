@@ -61,8 +61,7 @@ _SCHEMA_SQL = """\
 CREATE TABLE IF NOT EXISTS agents (
     agent_id       TEXT PRIMARY KEY,
     token_hash     TEXT NOT NULL UNIQUE,
-    parent_agent_id TEXT,
-    created_at     TEXT NOT NULL DEFAULT (datetime('now'))
+    parent_agent_id TEXT,    space          TEXT,    created_at     TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS tool_grants (
@@ -107,13 +106,14 @@ class _PermissionDB:
         token: str,
         tool_grants: Dict[str, List[str]],
         parent_agent_id: Optional[str] = None,
+        space: Optional[str] = None,
     ) -> None:
         token_hash = _hash_token(token)
         cur = self._conn.cursor()
         cur.execute(
-            "INSERT INTO agents (agent_id, token_hash, parent_agent_id) "
-            "VALUES (?, ?, ?)",
-            (agent_id, token_hash, parent_agent_id),
+            "INSERT INTO agents (agent_id, token_hash, parent_agent_id, space) "
+            "VALUES (?, ?, ?, ?)",
+            (agent_id, token_hash, parent_agent_id, space),
         )
         for server_id, tools in tool_grants.items():
             for tool in tools:
@@ -128,16 +128,19 @@ class _PermissionDB:
         """Verify a raw token and return agent info + grants, or None."""
         token_hash = _hash_token(token)
         row = self._conn.execute(
-            "SELECT agent_id FROM agents WHERE token_hash = ?",
+            "SELECT agent_id, space FROM agents WHERE token_hash = ?",
             (token_hash,),
         ).fetchone()
         if row is None:
             return None
-        agent_id = row[0]
-        return {
+        agent_id, space = row[0], row[1]
+        result: Dict[str, Any] = {
             "agent_id": agent_id,
             "tool_grants": self._load_grants(agent_id),
         }
+        if space:
+            result["space"] = space
+        return result
 
     def _load_grants(self, agent_id: str) -> Dict[str, List[str]]:
         rows = self._conn.execute(
@@ -150,16 +153,23 @@ class _PermissionDB:
         return grants
 
     def update_grants(
-        self, agent_id: str, tool_grants: Dict[str, List[str]]
+        self, agent_id: str, tool_grants: Dict[str, List[str]],
+        space: Optional[str] = ...,
     ) -> bool:
-        """Replace all tool grants for an agent.  Returns False if agent
-        does not exist."""
+        """Replace all tool grants for an agent.  Optionally update space.
+        Pass ``space=None`` to clear, omit (sentinel ``...``) to leave unchanged.
+        Returns False if agent does not exist."""
         row = self._conn.execute(
             "SELECT 1 FROM agents WHERE agent_id = ?", (agent_id,)
         ).fetchone()
         if row is None:
             return False
         cur = self._conn.cursor()
+        if space is not ...:
+            cur.execute(
+                "UPDATE agents SET space = ? WHERE agent_id = ?",
+                (space, agent_id),
+            )
         cur.execute("DELETE FROM tool_grants WHERE agent_id = ?", (agent_id,))
         for server_id, tools in tool_grants.items():
             for tool in tools:
@@ -187,13 +197,14 @@ class _PermissionDB:
 
     def list_agents(self) -> List[Dict[str, Any]]:
         rows = self._conn.execute(
-            "SELECT agent_id, parent_agent_id, created_at FROM agents"
+            "SELECT agent_id, parent_agent_id, space, created_at FROM agents"
         ).fetchall()
         return [
             {
                 "agent_id": r[0],
                 "parent_agent_id": r[1],
-                "created_at": r[2],
+                "space": r[2],
+                "created_at": r[3],
             }
             for r in rows
         ]
@@ -274,6 +285,7 @@ class PermissionMCPServerNode(MCPServerNode):
                 p.get("token", ""),
                 p.get("tool_grants", {}),
                 p.get("parent_agent_id"),
+                p.get("space"),
             )
 
         @self.service("/tagentacle/permission/get_grants")
@@ -310,11 +322,12 @@ class PermissionMCPServerNode(MCPServerNode):
         token: str,
         tool_grants: Dict[str, List[str]],
         parent_agent_id: Optional[str] = None,
+        space: Optional[str] = None,
     ) -> Dict[str, Any]:
         try:
             await asyncio.to_thread(
                 self._db.register_agent,
-                agent_id, token, tool_grants, parent_agent_id,
+                agent_id, token, tool_grants, parent_agent_id, space,
             )
             return {"status": "ok", "agent_id": agent_id}
         except sqlite3.IntegrityError as exc:
@@ -343,6 +356,7 @@ class PermissionMCPServerNode(MCPServerNode):
             jwt = sign_credential(
                 agent_id=info["agent_id"],
                 tool_grants=info["tool_grants"],
+                space=info.get("space"),
             )
             return jwt
 
@@ -360,6 +374,7 @@ class PermissionMCPServerNode(MCPServerNode):
             token: Annotated[str, Field(description="Secret token for the new agent")],
             tool_grants: Annotated[str, Field(description="JSON object: {server_id: [tool_name, ...], ...}")],
             parent_agent_id: Annotated[Optional[str], Field(description="Parent agent ID (optional)")] = None,
+            space: Annotated[Optional[str], Field(description="Isolated execution space bound to this agent (e.g. Docker container name)")] = None,
         ) -> str:
             is_admin = await asyncio.to_thread(self._is_admin, admin_token)
             if not is_admin:
@@ -369,7 +384,7 @@ class PermissionMCPServerNode(MCPServerNode):
             except json.JSONDecodeError as exc:
                 return f"Error: Invalid tool_grants JSON: {exc}"
             result = await self._do_register_agent(
-                agent_id, token, grants, parent_agent_id
+                agent_id, token, grants, parent_agent_id, space,
             )
             if "error" in result:
                 return f"Error: {result['error']}"

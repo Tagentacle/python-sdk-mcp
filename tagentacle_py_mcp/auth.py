@@ -18,9 +18,15 @@ JWT Payload Schema::
             "tagentacle_mcp_server": ["publish_to_topic", "subscribe_topic"],
             "tao_wallet_server": ["query_balance", "transfer"]
         },
+        "space": "agent_space_1",
         "iat": 1740000000,
         "exp": 1740086400
     }
+
+``space`` is an optional field that identifies the isolated execution
+environment (e.g. a Docker container) bound to this agent at runtime.
+Other nodes (such as shell-server) read ``CallerIdentity.space`` to
+route commands to the correct backend.
 
 The shared secret is loaded from the ``TAGENTACLE_AUTH_SECRET`` environment
 variable by both the issuer (PermissionMCPServerNode) and every auth-enabled
@@ -49,6 +55,7 @@ class CallerIdentity:
     """Identity of the authenticated MCP caller for the current request."""
     agent_id: str
     tool_grants: Dict[str, List[str]] = field(default_factory=dict)
+    space: Optional[str] = None
 
 
 #: Set per-request by the auth middleware; read via ``get_caller_identity()``.
@@ -121,6 +128,7 @@ def sign_credential(
     tool_grants: Dict[str, List[str]],
     secret: Optional[str] = None,
     ttl: int = _DEFAULT_TTL,
+    space: Optional[str] = None,
 ) -> str:
     """Issue a signed JWT credential.
 
@@ -129,6 +137,8 @@ def sign_credential(
         tool_grants: Mapping of ``server_id`` to list of allowed tool names.
         secret: HMAC secret (defaults to ``TAGENTACLE_AUTH_SECRET`` env var).
         ttl: Time-to-live in seconds (default 24 h).
+        space: Optional isolated execution environment bound to this agent
+            (e.g. Docker container name).  Included in the JWT if provided.
 
     Returns:
         A compact JWT string (``header.payload.signature``).
@@ -144,6 +154,8 @@ def sign_credential(
         "iat": now,
         "exp": now + ttl,
     }
+    if space is not None:
+        payload["space"] = space
 
     segments = [
         _b64url_encode(json.dumps(header, separators=(",", ":")).encode()),

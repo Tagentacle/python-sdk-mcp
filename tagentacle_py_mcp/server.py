@@ -261,6 +261,7 @@ class TACLAuthMiddleware(BaseHTTPMiddleware):
         identity = CallerIdentity(
             agent_id=payload["agent_id"],
             tool_grants=payload.get("tool_grants", {}),
+            space=payload.get("space"),
         )
         set_caller_identity(identity)
         try:
