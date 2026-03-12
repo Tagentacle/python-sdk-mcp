@@ -49,9 +49,7 @@ from tagentacle_py_mcp.auth import (
     verify_credential,
     CallerIdentity,
     set_caller_identity,
-    check_tool_authorized,
     CredentialInvalid,
-    ToolNotAuthorized,
 )
 
 logger = logging.getLogger("tagentacle.mcp.server")
