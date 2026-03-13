@@ -8,42 +8,22 @@ on:
 
 jobs:
   lint:
-    name: Ruff lint
+    name: Lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - run: pip install ruff
-      - run: ruff check .
-      - run: ruff format --check .
+      - uses: astral-sh/setup-uv@v5
+      - run: uv tool run ruff check .
+      - run: uv tool run ruff format --check .
 
-  test:
-    name: Tests
+  build:
+    name: Build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # Also checkout python-sdk-core for local path dependency
       - uses: actions/checkout@v4
         with:
           repository: Tagentacle/python-sdk-core
-          path: _deps/python-sdk-core
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - run: pip install -e _deps/python-sdk-core
-      - run: pip install -e "."
-      - run: pip install pytest pytest-asyncio
-      - run: pytest -v
-
-  build:
-    name: Build check
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - run: pip install build
-      - run: python -m build
+          path: ../python-sdk-core
+      - uses: astral-sh/setup-uv@v5
+      - run: uv build
