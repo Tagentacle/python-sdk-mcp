@@ -1,30 +1,44 @@
 """
-Tagentacle MCP Server SDK — MCPServerNode base class and TagentacleMCPServer.
+Tagentacle MCP Server SDK — MCPServerComponent and TagentacleMCPServer.
 
 This module provides:
-  - MCPServerNode: Abstract base class for building MCP Server Nodes in a
-    Tagentacle workspace. Inherits LifecycleNode and runs a FastMCP
-    Streamable HTTP server, publishing its URL to /mcp/directory on activation.
+  - MCPServerComponent: Composable MCP Server component. Manages FastMCP +
+    uvicorn HTTP server + /mcp/directory publishing. Does NOT inherit Node —
+    designed for has-a composition with any LifecycleNode.
+  - MCPServerNode: DEPRECATED thin wrapper (LifecycleNode + MCPServerComponent)
+    for backward compatibility. New code should use MCPServerComponent directly.
   - TagentacleMCPServer: Built-in MCP Server that exposes Tagentacle bus
     operations (publish, subscribe, call_service, introspection) as MCP Tools.
 
-Architecture (post-refactor):
-  - MCP Server Nodes run their own HTTP endpoint (Streamable HTTP transport).
+Architecture:
+  - MCP Server is an interface capability, not a Node type.
+  - Any Node can compose MCPServerComponent to expose an MCP endpoint.
   - Agent Nodes discover servers via /mcp/directory Topic and connect using
     the native MCP SDK HTTP client — no bus-as-transport intermediary.
-  - This enables full MCP protocol support including server→client sampling.
 
-Usage (custom MCP Server Node):
-    class WeatherServer(MCPServerNode):
+Usage (composition pattern — recommended):
+    class WeatherServer(LifecycleNode):
         def __init__(self):
-            super().__init__("weather_server", mcp_port=8100)
+            super().__init__("weather_server")
+            self.mcp_server = MCPServerComponent(
+                "weather_server", mcp_port=8100,
+                description="Weather tools",
+            )
 
         def on_configure(self, config):
-            super().on_configure(config)
-
-            @self.mcp.tool(description="Get weather for a city")
+            @self.mcp_server.mcp.tool(description="Get weather for a city")
             def get_weather(city: str) -> str:
                 return f"Sunny in {city}"
+            self.mcp_server.configure(config)
+
+        async def on_activate(self):
+            await self.mcp_server.start(publish_fn=self.publish)
+
+        async def on_deactivate(self):
+            await self.mcp_server.stop(publish_fn=self.publish)
+
+        async def on_shutdown(self):
+            await self.mcp_server.shutdown()
 
     async def main():
         node = WeatherServer()
@@ -35,7 +49,8 @@ Usage (custom MCP Server Node):
 import asyncio
 import json
 import logging
-from typing import Any, Annotated, Dict, List, Optional
+import warnings
+from typing import Any, Annotated, Callable, Coroutine, Dict, List, Optional
 
 import uvicorn
 from mcp.server.fastmcp import FastMCP
@@ -57,36 +72,41 @@ logger = logging.getLogger("tagentacle.mcp.server")
 # Standard topic for MCP server discovery
 MCP_DIRECTORY_TOPIC = "/mcp/directory"
 
+# Type alias for publish callback: async (topic, payload) -> None
+PublishFn = Callable[[str, dict], Coroutine[Any, Any, None]]
 
-class MCPServerNode(LifecycleNode):
-    """Abstract base class for MCP Server Nodes in a Tagentacle workspace.
+
+# ---------------------------------------------------------------------------
+# MCPServerComponent — composable MCP server (no Node inheritance)
+# ---------------------------------------------------------------------------
+
+
+class MCPServerComponent:
+    """Composable MCP Server component — manages FastMCP + uvicorn + directory.
+
+    Does NOT inherit Node. Designed for has-a composition with any
+    LifecycleNode (or standalone use).
 
     Provides:
-      - A FastMCP instance for tool/resource/prompt registration.
-      - Automatic Streamable HTTP server startup on activation.
-      - Automatic /mcp/directory Topic publishing for server discovery.
-
-    Subclasses should register MCP tools in on_configure() using self.mcp
-    (the FastMCP instance), then call super().on_configure(config).
+      - A FastMCP instance for tool/resource/prompt registration (``self.mcp``).
+      - ``start()`` / ``stop()`` for uvicorn HTTP server lifecycle.
+      - Optional ``/mcp/directory`` Topic publishing via ``publish_fn``.
+      - Optional TACL auth middleware.
 
     Constructor Args:
-        node_id: Tagentacle Node ID for bus communication.
-        mcp_name: Human-readable name for the MCP server (default: node_id).
+        server_id: Identifier for this server (used in directory publishing).
+        mcp_name: Human-readable name for the MCP server (default: server_id).
         mcp_port: HTTP port for the Streamable HTTP endpoint.
         mcp_host: HTTP host to bind to (default: "127.0.0.1").
         mcp_path: URL path for the MCP endpoint (default: "/mcp").
         concurrent_sessions: Whether this server supports concurrent sessions.
         description: Human-readable description of this server.
-        auth_required: If True, requires a valid JWT Bearer token on every
-            HTTP request. The token's ``tool_grants`` are enforced: only
-            granted tools are visible in ``list_tools`` and callable.
-            The caller's ``agent_id`` is available to tool handlers via
-            ``tagentacle_py_mcp.auth.get_caller_identity()``.
+        auth_required: If True, mounts TACLAuthMiddleware requiring JWT Bearer.
     """
 
     def __init__(
         self,
-        node_id: str,
+        server_id: str,
         *,
         mcp_name: Optional[str] = None,
         mcp_port: int = 8000,
@@ -96,19 +116,19 @@ class MCPServerNode(LifecycleNode):
         description: str = "",
         auth_required: bool = False,
     ):
-        super().__init__(node_id)
+        self.server_id = server_id
         self._mcp_port = mcp_port
         self._mcp_host = mcp_host
         self._mcp_path = mcp_path
         self._concurrent_sessions = concurrent_sessions
-        self._server_description = description
+        self._description = description
         self._auth_required = auth_required
         self._uvicorn_server: Optional[uvicorn.Server] = None
         self._http_task: Optional[asyncio.Task] = None
 
-        # Create FastMCP instance — subclasses register tools on this
+        # FastMCP instance — register tools/resources/prompts on this
         self.mcp = FastMCP(
-            name=mcp_name or node_id,
+            name=mcp_name or server_id,
             host=mcp_host,
             port=mcp_port,
             streamable_http_path=mcp_path,
@@ -119,13 +139,8 @@ class MCPServerNode(LifecycleNode):
         """The full URL of this server's MCP endpoint."""
         return f"http://{self._mcp_host}:{self._mcp_port}{self._mcp_path}"
 
-    def on_configure(self, config: Dict[str, Any]):
-        """Configure the MCP Server Node.
-
-        Reads mcp_port/mcp_host from bringup config if provided,
-        overriding constructor defaults. Subclasses should register
-        tools BEFORE calling super().on_configure(config).
-        """
+    def configure(self, config: Dict[str, Any]) -> None:
+        """Read mcp_port/mcp_host from config dict if present."""
         if "mcp_port" in config:
             self._mcp_port = int(config["mcp_port"])
             self.mcp.settings.port = self._mcp_port
@@ -133,16 +148,19 @@ class MCPServerNode(LifecycleNode):
             self._mcp_host = config["mcp_host"]
             self.mcp.settings.host = self._mcp_host
 
-    async def on_activate(self):
-        """Start the Streamable HTTP server and publish to /mcp/directory."""
-        # Start uvicorn in a background task
+    async def start(self, *, publish_fn: Optional[PublishFn] = None) -> None:
+        """Start the uvicorn HTTP server.
+
+        If ``publish_fn`` is provided, publishes an "available" entry to
+        ``/mcp/directory`` after the server is listening.
+        """
         starlette_app = self.mcp.streamable_http_app()
 
-        # Wrap with auth middleware when auth is enabled
         if self._auth_required:
-            starlette_app.add_middleware(TACLAuthMiddleware, server_id=self.node_id)
+            starlette_app.add_middleware(TACLAuthMiddleware, server_id=self.server_id)
             logger.info(
-                f"MCP Server '{self.node_id}' auth enabled — JWT Bearer token required."
+                "MCP Server '%s' auth enabled — JWT Bearer token required.",
+                self.server_id,
             )
 
         config = uvicorn.Config(
@@ -157,13 +175,18 @@ class MCPServerNode(LifecycleNode):
         # Give uvicorn a moment to bind
         await asyncio.sleep(0.3)
 
-        # Publish server description to /mcp/directory
-        await self._publish_directory("available")
-        logger.info(f"MCP Server '{self.node_id}' active at {self.mcp_url}")
+        if publish_fn:
+            await self._publish_directory("available", publish_fn)
+        logger.info("MCP Server '%s' active at %s", self.server_id, self.mcp_url)
 
-    async def on_deactivate(self):
-        """Stop the HTTP server and publish unavailable status."""
-        await self._publish_directory("unavailable")
+    async def stop(self, *, publish_fn: Optional[PublishFn] = None) -> None:
+        """Stop the uvicorn HTTP server.
+
+        If ``publish_fn`` is provided, publishes an "unavailable" entry to
+        ``/mcp/directory`` before shutting down.
+        """
+        if publish_fn:
+            await self._publish_directory("unavailable", publish_fn)
         if self._uvicorn_server:
             self._uvicorn_server.should_exit = True
         if self._http_task:
@@ -171,10 +194,10 @@ class MCPServerNode(LifecycleNode):
                 await asyncio.wait_for(self._http_task, timeout=5.0)
             except (asyncio.TimeoutError, asyncio.CancelledError):
                 self._http_task.cancel()
-        logger.info(f"MCP Server '{self.node_id}' deactivated.")
+        logger.info("MCP Server '%s' stopped.", self.server_id)
 
-    async def on_shutdown(self):
-        """Ensure HTTP server is stopped on shutdown."""
+    async def shutdown(self) -> None:
+        """Ensure the HTTP server is stopped (idempotent)."""
         if self._uvicorn_server and self._http_task and not self._http_task.done():
             self._uvicorn_server.should_exit = True
             try:
@@ -182,32 +205,96 @@ class MCPServerNode(LifecycleNode):
             except (asyncio.TimeoutError, asyncio.CancelledError):
                 self._http_task.cancel()
 
-    async def _publish_directory(self, status: str):
-        """Publish MCPServerDescription to /mcp/directory Topic."""
-        # Gather tool names if available
-        tools_summary = []
+    def directory_entry(self, status: str = "available") -> dict:
+        """Return an MCPServerDescription dict for /mcp/directory publishing."""
+        tools_summary: list[str] = []
         try:
-            # FastMCP stores tools internally
             tools_summary = list(self.mcp._tool_manager._tools.keys())
         except Exception:
             pass
 
-        description = {
-            "server_id": self.node_id,
+        return {
+            "server_id": self.server_id,
             "url": self.mcp_url,
             "transport": "streamable-http",
             "concurrent_sessions": self._concurrent_sessions,
             "status": status,
             "source": "node",
             "tools_summary": tools_summary,
-            "description": self._server_description,
-            "publisher_node_id": self.node_id,
+            "description": self._description,
+            "publisher_node_id": self.server_id,
             "auth_required": self._auth_required,
         }
+
+    async def _publish_directory(self, status: str, publish_fn: PublishFn) -> None:
+        """Publish MCPServerDescription to /mcp/directory via callback."""
         try:
-            await self.publish(MCP_DIRECTORY_TOPIC, description)
+            await publish_fn(MCP_DIRECTORY_TOPIC, self.directory_entry(status))
         except Exception as e:
-            logger.warning(f"Failed to publish to {MCP_DIRECTORY_TOPIC}: {e}")
+            logger.warning("Failed to publish to %s: %s", MCP_DIRECTORY_TOPIC, e)
+
+
+# ---------------------------------------------------------------------------
+# MCPServerNode — DEPRECATED backward-compatible wrapper
+# ---------------------------------------------------------------------------
+
+
+class MCPServerNode(LifecycleNode):
+    """DEPRECATED: Use LifecycleNode + MCPServerComponent instead.
+
+    Thin wrapper that composes MCPServerComponent internally and wires
+    lifecycle hooks automatically.  Kept for backward compatibility with
+    existing subclasses (e.g. PermissionMCPServerNode).
+    """
+
+    def __init__(
+        self,
+        node_id: str,
+        *,
+        mcp_name: Optional[str] = None,
+        mcp_port: int = 8000,
+        mcp_host: str = "127.0.0.1",
+        mcp_path: str = "/mcp",
+        concurrent_sessions: bool = True,
+        description: str = "",
+        auth_required: bool = False,
+    ):
+        warnings.warn(
+            "MCPServerNode is deprecated. "
+            "Use LifecycleNode + MCPServerComponent instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        super().__init__(node_id)
+        self._mcp_component = MCPServerComponent(
+            server_id=node_id,
+            mcp_name=mcp_name,
+            mcp_port=mcp_port,
+            mcp_host=mcp_host,
+            mcp_path=mcp_path,
+            concurrent_sessions=concurrent_sessions,
+            description=description,
+            auth_required=auth_required,
+        )
+        # Passthrough for backward compat — subclasses use self.mcp
+        self.mcp = self._mcp_component.mcp
+
+    @property
+    def mcp_url(self) -> str:
+        """The full URL of this server's MCP endpoint."""
+        return self._mcp_component.mcp_url
+
+    def on_configure(self, config: Dict[str, Any]):
+        self._mcp_component.configure(config)
+
+    async def on_activate(self):
+        await self._mcp_component.start(publish_fn=self.publish)
+
+    async def on_deactivate(self):
+        await self._mcp_component.stop(publish_fn=self.publish)
+
+    async def on_shutdown(self):
+        await self._mcp_component.shutdown()
 
 
 # ---------------------------------------------------------------------------
@@ -268,8 +355,10 @@ class TACLAuthMiddleware(BaseHTTPMiddleware):
         return response
 
 
-class TagentacleMCPServer(MCPServerNode):
-    """Built-in MCP Server Node exposing Tagentacle bus operations as MCP Tools.
+class TagentacleMCPServer(LifecycleNode):
+    """Built-in MCP Server exposing Tagentacle bus operations as MCP Tools.
+
+    Uses LifecycleNode + MCPServerComponent (composition, not inheritance).
 
     Provides 10 MCP tools for bus interaction:
       - publish_to_topic, subscribe_topic, unsubscribe_topic
@@ -288,12 +377,15 @@ class TagentacleMCPServer(MCPServerNode):
         mcp_port: int = 8000,
         allowed_topics: Optional[List[str]] = None,
     ):
-        super().__init__(
-            node_id,
+        super().__init__(node_id)
+        self.mcp_server = MCPServerComponent(
+            server_id=node_id,
             mcp_name="tagentacle-mcp-server",
             mcp_port=mcp_port,
             description="Built-in MCP Server exposing Tagentacle bus operations as tools.",
         )
+        # Convenience alias — tools are registered on the FastMCP instance
+        self.mcp = self.mcp_server.mcp
         self.allowed_topics = allowed_topics
         self._subscribed_topics: Dict[str, List[Dict[str, Any]]] = {}
         self.mcp.instructions = (
@@ -302,6 +394,27 @@ class TagentacleMCPServer(MCPServerNode):
             "the running system."
         )
         self._register_bus_tools()
+
+    @property
+    def mcp_url(self) -> str:
+        """The full URL of this server's MCP endpoint."""
+        return self.mcp_server.mcp_url
+
+    def on_configure(self, config: Dict[str, Any]):
+        """Configure MCP port/host from bringup config."""
+        self.mcp_server.configure(config)
+
+    async def on_activate(self):
+        """Start the MCP HTTP server and publish to /mcp/directory."""
+        await self.mcp_server.start(publish_fn=self.publish)
+
+    async def on_deactivate(self):
+        """Stop the HTTP server and publish unavailable status."""
+        await self.mcp_server.stop(publish_fn=self.publish)
+
+    async def on_shutdown(self):
+        """Ensure HTTP server is stopped."""
+        await self.mcp_server.shutdown()
 
     def _register_bus_tools(self) -> None:
         """Register all bus interaction tools with FastMCP."""

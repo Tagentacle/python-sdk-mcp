@@ -1,11 +1,13 @@
 """
-Tagentacle MCP Integration: MCPServerNode base class, built-in bus tools server,
+Tagentacle MCP Integration: MCPServerComponent, built-in bus tools server,
 and TACL (Tagentacle Access Control Layer) authentication system.
 
 This package provides:
-  - MCPServerNode: Abstract base class for MCP Server Nodes that run a
-    Streamable HTTP endpoint and publish to /mcp/directory for discovery.
-    Supports optional ``auth_required=True`` for JWT-based access control.
+  - MCPServerComponent: Composable MCP Server component (no Node inheritance).
+    Manages FastMCP + uvicorn + /mcp/directory publishing. Designed for has-a
+    composition with any LifecycleNode.
+  - MCPServerNode: DEPRECATED wrapper (LifecycleNode + MCPServerComponent).
+    Kept for backward compatibility. Use MCPServerComponent directly.
   - TagentacleMCPServer: Built-in MCP Server exposing bus operations as MCP Tools.
   - MCP_DIRECTORY_TOPIC: Standard topic name for MCP server discovery.
   - Auth primitives (``tagentacle_py_mcp.auth``): JWT sign/verify, CallerIdentity,
@@ -16,6 +18,7 @@ This package provides:
 """
 
 from tagentacle_py_mcp.server import (
+    MCPServerComponent,
     MCPServerNode,
     TagentacleMCPServer,
     TACLAuthMiddleware,
@@ -37,7 +40,9 @@ from tagentacle_py_mcp.auth import (
 from tagentacle_py_mcp.auth_client import AuthMCPClient
 
 __all__ = [
-    # Server
+    # Component (recommended)
+    "MCPServerComponent",
+    # Server (deprecated wrapper)
     "MCPServerNode",
     "TagentacleMCPServer",
     "TACLAuthMiddleware",
