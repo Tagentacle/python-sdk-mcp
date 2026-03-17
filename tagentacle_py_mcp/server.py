@@ -568,14 +568,17 @@ class BusMCPServer(LifecycleNode):
 # Backward-compatibility alias
 # ---------------------------------------------------------------------------
 
+
 def _deprecated_alias():
     import warnings
+
     warnings.warn(
         "TagentacleMCPServer is deprecated, use BusMCPServer instead.",
         DeprecationWarning,
         stacklevel=3,
     )
     return BusMCPServer
+
 
 TagentacleMCPServer = BusMCPServer  # direct alias, no warning on import
 # To emit warnings on instantiation, downstream can check class.__name__.
