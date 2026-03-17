@@ -1,10 +1,10 @@
-"""Thin entry point for the Tagentacle Permission MCP Server node.
+"""Thin entry point for the TACL Authority node.
 
-Launches PermissionMCPServerNode as a LifecycleNode with Streamable HTTP.
+Launches TACLAuthority as a LifecycleNode with Streamable HTTP.
 This is the TACL credential issuer — agents connect here to authenticate
 and receive JWT credentials for accessing other auth-enabled MCP servers.
 
-Requires: ``pip install tagentacle-py-mcp[permission]``
+Requires: ``pip install tagentacle-py-tacl[authority]``
 """
 
 import asyncio
@@ -15,16 +15,14 @@ import sys
 
 async def main():
     logging.basicConfig(level=logging.INFO)
-    logger = logging.getLogger("tagentacle.mcp.permission")
+    logger = logging.getLogger("tagentacle.tacl.authority")
 
-    # Import here so the module-level import error is clear if aiosqlite
-    # is missing (it's an optional dependency).
     try:
-        from tagentacle_py_mcp.permission import PermissionMCPServerNode
+        from tagentacle_py_tacl.authority import TACLAuthority
     except ImportError as exc:
         logger.error(
-            "Failed to import PermissionMCPServerNode: %s\n"
-            "Install with: uv pip install tagentacle-py-mcp[permission]",
+            "Failed to import TACLAuthority: %s\n"
+            "Install with: uv pip install tagentacle-py-tacl[authority]",
             exc,
         )
         sys.exit(1)
@@ -32,7 +30,7 @@ async def main():
     mcp_port = int(os.environ.get("MCP_PORT", "8200"))
     db_path = os.environ.get("TAGENTACLE_PERMISSION_DB", "permission.db")
 
-    server = PermissionMCPServerNode(mcp_port=mcp_port, db_path=db_path)
+    server = TACLAuthority(mcp_port=mcp_port, db_path=db_path)
     await server.connect()
     spin_task = asyncio.create_task(server.spin())
 

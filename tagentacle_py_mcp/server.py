@@ -56,17 +56,8 @@ from typing import Any, Annotated, Callable, Coroutine, Dict, List, Optional
 import uvicorn
 from mcp.server.fastmcp import FastMCP
 from pydantic import Field
-from starlette.requests import Request
-from starlette.responses import JSONResponse
-from starlette.middleware.base import BaseHTTPMiddleware
 from tagentacle_py_core import LifecycleNode
-
-from tagentacle_py_mcp.auth import (
-    verify_credential,
-    CallerIdentity,
-    set_caller_identity,
-    CredentialInvalid,
-)
+from tagentacle_py_tacl.middleware import TACLAuthMiddleware  # noqa: F401
 
 logger = logging.getLogger("tagentacle.mcp.server")
 
@@ -300,64 +291,6 @@ class MCPServerNode(LifecycleNode):
 
     async def on_shutdown(self):
         await self._mcp_component.shutdown()
-
-
-# ---------------------------------------------------------------------------
-# TACL Auth Middleware
-# ---------------------------------------------------------------------------
-
-
-class TACLAuthMiddleware(BaseHTTPMiddleware):
-    """Starlette middleware that enforces JWT Bearer authentication.
-
-    On every request:
-      1. Extracts ``Authorization: Bearer <jwt>`` from headers.
-      2. Verifies the JWT signature and expiry via ``verify_credential()``.
-      3. Sets the ``CallerIdentity`` in a ``contextvars.ContextVar`` so tool
-         handlers can read it via ``get_caller_identity()``.
-
-    If authentication fails the request is rejected with HTTP 401.
-    """
-
-    def __init__(self, app, server_id: str = ""):
-        super().__init__(app)
-        self.server_id = server_id
-
-    async def dispatch(self, request: Request, call_next):
-        # Extract Bearer token
-        auth_header = request.headers.get("authorization", "")
-        if not auth_header.startswith("Bearer "):
-            return JSONResponse(
-                {
-                    "error": "Missing or malformed Authorization header. "
-                    "Expected: Bearer <jwt>"
-                },
-                status_code=401,
-            )
-
-        token = auth_header[7:]  # strip "Bearer "
-
-        try:
-            payload = verify_credential(token)
-        except CredentialInvalid as exc:
-            return JSONResponse(
-                {"error": f"Authentication failed: {exc}"},
-                status_code=401,
-            )
-
-        # Set caller identity for the duration of this request
-        identity = CallerIdentity(
-            agent_id=payload["agent_id"],
-            tool_grants=payload.get("tool_grants", {}),
-            space=payload.get("space"),
-        )
-        set_caller_identity(identity)
-        try:
-            response = await call_next(request)
-        finally:
-            set_caller_identity(None)
-
-        return response
 
 
 class BusMCPServer(LifecycleNode):

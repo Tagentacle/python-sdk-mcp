@@ -1,6 +1,6 @@
 """
 Tagentacle MCP Integration: MCPServerComponent, built-in bus tools server,
-and TACL (Tagentacle Access Control Layer) authentication system.
+and TACL re-exports for backward compatibility.
 
 This package provides:
   - MCPServerComponent: Composable MCP Server component (no Node inheritance).
@@ -11,11 +11,9 @@ This package provides:
   - BusMCPServer: Built-in MCP Server exposing bus operations as MCP Tools.
     (Previously named TagentacleMCPServer; alias kept for backward compat.)
   - MCP_DIRECTORY_TOPIC: Standard topic name for MCP server discovery.
-  - Auth primitives (``tagentacle_py_mcp.auth``): JWT sign/verify, CallerIdentity,
-    get_caller_identity(), check_tool_authorized().
-  - AuthMCPClient (``tagentacle_py_mcp.auth_client``): Auth-aware MCP client.
-  - PermissionMCPServerNode (``tagentacle_py_mcp.permission``): JWT credential
-    issuer and agent registry (requires ``[permission]`` optional dependency).
+
+TACL auth primitives have moved to ``tagentacle-py-tacl`` (python-sdk-tacl).
+For backward compatibility, they are re-exported here.
 """
 
 from tagentacle_py_mcp.server import (
@@ -27,7 +25,8 @@ from tagentacle_py_mcp.server import (
     MCP_DIRECTORY_TOPIC,
 )
 
-from tagentacle_py_mcp.auth import (
+# Re-export TACL from the new package for backward compatibility
+from tagentacle_py_tacl.auth import (
     CallerIdentity,
     get_caller_identity,
     set_caller_identity,
@@ -39,7 +38,7 @@ from tagentacle_py_mcp.auth import (
     ToolNotAuthorized,
 )
 
-from tagentacle_py_mcp.auth_client import AuthMCPClient
+from tagentacle_py_tacl.client import AuthMCPClient
 
 __all__ = [
     # Component (recommended)
