@@ -207,7 +207,11 @@ class MCPServerComponent:
                 self._http_task.cancel()
 
     def directory_entry(self, status: str = "available") -> dict:
-        """Return an MCPServerDescription dict for /mcp/directory publishing."""
+        """Return an MCPServerDescription dict for /mcp/directory publishing.
+
+        Schema: mcp-interfaces/msg/MCPServerDescription.json
+        See: https://tagentacle.dev/schemas/MCPServerDescription.json
+        """
         tools_summary: list[str] = []
         try:
             tools_summary = list(self.mcp._tool_manager._tools.keys())

@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "tagentacle-py-core>=0.1.0",
+    "mcp-interfaces>=0.1.0",
     "mcp>=1.8",
     "anyio>=4.0",
     "uvicorn>=0.20",
@@ -17,6 +18,7 @@ permission = []
 
 [tool.uv.sources]
 tagentacle-py-core = { path = "../python-sdk-core", editable = true }
+mcp-interfaces = { path = "../mcp-interfaces", editable = true }
 
 [build-system]
 requires = ["hatchling"]
