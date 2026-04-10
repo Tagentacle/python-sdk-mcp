@@ -139,11 +139,11 @@ topics = mailbox.topics               # set of subscribed topics
 level = mailbox.get_level(topic)      # current subscription level
 ```
 
-> **Future**: BusMailboxComponent will be renamed to **InboxMCP** as part of Q27 SDK restructuring. See [ALIGNMENT_ANALYSIS Q26](https://github.com/Tagentacle/python-sdk-mcp/issues/2).
+> **Future**: BusMailboxComponent will be renamed to **InboxMCP** as part of Q27 SDK restructuring. See [ALIGNMENT_ANALYSIS Q26](https://github.com/Tagentacle/tagentacle-py-mcp/issues/2).
 
 ## TACL — Tagentacle Access Control Layer
 
-JWT-based MCP tool-level authentication. TACL core has moved to [`tagentacle-py-tacl`](https://github.com/Tagentacle/python-sdk-tacl); auth primitives are re-exported here for backward compatibility.
+JWT-based MCP tool-level authentication. TACL core has moved to [`tagentacle-py-tacl`](https://github.com/Tagentacle/tagentacle-py-tacl); auth primitives are re-exported here for backward compatibility.
 
 ### Enable Auth on Your MCP Server
 

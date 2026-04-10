@@ -6,22 +6,25 @@ This package provides:
   - MCPServerComponent: Composable MCP Server component (no Node inheritance).
     Manages FastMCP + uvicorn + /mcp/directory publishing. Designed for has-a
     composition with any LifecycleNode.
-  - BusMCPServer: Built-in MCP Server exposing bus operations as MCP Tools.
-    (Previously named TagentacleMCPServer; alias kept for backward compat.)
+  - BusMCPNode: Built-in MCP Server exposing bus operations as MCP Tools.
+    (Previously named BusMCPServer / TagentacleMCPServer; aliases kept.)
+  - InboxMCP: Composable mailbox with dual Python/MCP access.
+    (Previously named BusMailboxComponent; alias kept.)
   - MCP_DIRECTORY_TOPIC: Standard topic name for MCP server discovery.
 
-TACL auth primitives have moved to ``tagentacle-py-tacl`` (python-sdk-tacl).
+TACL auth primitives have moved to ``tagentacle-py-tacl``.
 For backward compatibility, they are re-exported here.
 """
 
 from tagentacle_py_mcp.server import (
     MCPServerComponent,
-    BusMCPServer,
+    BusMCPNode,
+    BusMCPServer,  # backward compat alias (Q27)
     TagentacleMCPServer,  # backward compat alias
     TACLAuthMiddleware,
     MCP_DIRECTORY_TOPIC,
 )
-from tagentacle_py_mcp.mailbox import BusMailboxComponent
+from tagentacle_py_mcp.mailbox import InboxMCP, BusMailboxComponent  # BusMailboxComponent = compat alias
 
 # Re-export TACL from the new package for backward compatibility
 from tagentacle_py_tacl.auth import (
@@ -39,12 +42,14 @@ from tagentacle_py_tacl.auth import (
 from tagentacle_py_tacl.client import AuthMCPClient
 
 __all__ = [
-    # Component (recommended)
+    # Component (recommended — Q27 names)
     "MCPServerComponent",
+    "InboxMCP",
+    "BusMCPNode",
+    # Backward compat aliases
     "BusMailboxComponent",
-    # Built-in servers
     "BusMCPServer",
-    "TagentacleMCPServer",  # backward compat alias
+    "TagentacleMCPServer",
     "TACLAuthMiddleware",
     "MCP_DIRECTORY_TOPIC",
     # Auth primitives

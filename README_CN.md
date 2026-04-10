@@ -99,7 +99,7 @@ await server.spin()
 
 ## TACL — Tagentacle 访问控制层
 
-基于 JWT 的 MCP 工具级身份认证。TACL 核心已移至 [`tagentacle-py-tacl`](https://github.com/Tagentacle/python-sdk-tacl)；认证原语在此处重导出以保持向后兼容。
+基于 JWT 的 MCP 工具级身份认证。TACL 核心已移至 [`tagentacle-py-tacl`](https://github.com/Tagentacle/tagentacle-py-tacl)；认证原语在此处重导出以保持向后兼容。
 
 ### 为 MCP Server 启用认证
 

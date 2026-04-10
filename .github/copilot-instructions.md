@@ -25,8 +25,8 @@ This package depends on `tagentacle-py-core` via path dependency (see `[tool.uv.
 
 ```bash
 cd /path/to/workspace
-pip install -e python-sdk-core
-pip install -e python-sdk-mcp
+pip install -e tagentacle-py-core
+pip install -e tagentacle-py-mcp
 ```
 
 ### Adding Tests

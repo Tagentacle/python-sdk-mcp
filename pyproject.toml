@@ -18,8 +18,8 @@ dependencies = [
 permission = []
 
 [tool.uv.sources]
-tagentacle-py-core = { path = "../python-sdk-core", editable = true }
-tagentacle-py-tacl = { path = "../python-sdk-tacl", editable = true }
+tagentacle-py-core = { path = "../tagentacle-py-core", editable = true }
+tagentacle-py-tacl = { path = "../tagentacle-py-tacl", editable = true }
 mcp-interfaces = { path = "../mcp-interfaces", editable = true }
 
 [build-system]

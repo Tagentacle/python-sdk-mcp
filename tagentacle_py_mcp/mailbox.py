@@ -1,4 +1,4 @@
-"""BusMailboxComponent — composable mailbox for any LifecycleNode.
+"""InboxMCP — composable mailbox for any LifecycleNode.
 
 Provides per-topic message buffering, MCP resources (``bus://mailbox/*``),
 and ``notifications/resources/updated`` delivery.
@@ -15,7 +15,7 @@ Usage::
         def __init__(self):
             super().__init__("my_node")
             self.mcp_server = MCPServerComponent("my_node", mcp_port=8100)
-            self.mailbox = BusMailboxComponent(self, self.mcp_server.mcp)
+            self.mailbox = InboxMCP(self, self.mcp_server.mcp)
 """
 
 import json
@@ -29,7 +29,7 @@ from pydantic import AnyUrl, Field
 logger = logging.getLogger("tagentacle.mcp.mailbox")
 
 
-class BusMailboxComponent:
+class InboxMCP:
     """Composable mailbox component — message buffering + MCP resources.
 
     Registers subscribe/poll tools and ``bus://mailbox`` resources on the
@@ -299,3 +299,6 @@ class BusMailboxComponent:
             await self._mcp_session.send_resource_list_changed()
         except Exception as e:
             logger.debug("Failed to send resource list changed: %s", e)
+
+# Backward compatibility alias (Q27)
+BusMailboxComponent = InboxMCP

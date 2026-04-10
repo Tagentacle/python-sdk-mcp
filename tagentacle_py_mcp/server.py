@@ -1,11 +1,11 @@
 """
-Tagentacle MCP Server SDK — MCPServerComponent and BusMCPServer.
+Tagentacle MCP Server SDK — MCPServerComponent and BusMCPNode.
 
 This module provides:
   - MCPServerComponent: Composable MCP Server component. Manages FastMCP +
     uvicorn HTTP server + /mcp/directory publishing. Does NOT inherit Node —
     designed for has-a composition with any LifecycleNode.
-  - BusMCPServer: Built-in MCP Server that exposes Tagentacle bus
+  - BusMCPNode: Built-in MCP Server that exposes Tagentacle bus
     operations (publish, subscribe, call_service, introspection) as MCP Tools.
     (Previously named TagentacleMCPServer; alias kept for backward compat.)
 
@@ -54,7 +54,7 @@ import uvicorn
 from mcp.server.fastmcp import FastMCP
 from pydantic import Field
 from tagentacle_py_core import LifecycleNode
-from tagentacle_py_mcp.mailbox import BusMailboxComponent
+from tagentacle_py_mcp.mailbox import InboxMCP
 from tagentacle_py_tacl.middleware import TACLAuthMiddleware  # noqa: F401
 
 logger = logging.getLogger("tagentacle.mcp.server")
@@ -230,15 +230,15 @@ class MCPServerComponent:
             logger.warning("Failed to publish to %s: %s", MCP_DIRECTORY_TOPIC, e)
 
 
-class BusMCPServer(LifecycleNode):
+class BusMCPNode(LifecycleNode):
     """Built-in MCP Server exposing Tagentacle bus operations as MCP Tools.
 
-    Uses LifecycleNode + MCPServerComponent + BusMailboxComponent (composition).
+    Uses LifecycleNode + MCPServerComponent + InboxMCP (composition).
 
     Provides MCP tools for bus interaction:
       - publish_to_topic (direct)
       - subscribe_topic, unsubscribe_topic, set_subscription_level,
-        poll_messages (via BusMailboxComponent)
+        poll_messages (via InboxMCP)
       - list_nodes, list_topics, list_services, get_node_info,
         describe_topic_schema, call_bus_service, ping_daemon (direct)
 
@@ -276,7 +276,7 @@ class BusMCPServer(LifecycleNode):
         self.allowed_topics = allowed_topics
 
         # Mailbox component — subscribe/poll tools + bus://mailbox resources
-        self.mailbox = BusMailboxComponent(
+        self.mailbox = InboxMCP(
             self, self.mcp, allowed_topics=allowed_topics
         )
 
@@ -415,12 +415,15 @@ def _deprecated_alias():
     import warnings
 
     warnings.warn(
-        "TagentacleMCPServer is deprecated, use BusMCPServer instead.",
+        "TagentacleMCPServer is deprecated, use BusMCPNode instead.",
         DeprecationWarning,
         stacklevel=3,
     )
-    return BusMCPServer
+    return BusMCPNode
 
 
-TagentacleMCPServer = BusMCPServer  # direct alias, no warning on import
+TagentacleMCPServer = BusMCPNode  # direct alias, no warning on import
 # To emit warnings on instantiation, downstream can check class.__name__.
+
+# Backward compatibility alias (Q27)
+BusMCPServer = BusMCPNode
