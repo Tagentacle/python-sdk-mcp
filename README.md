@@ -97,6 +97,50 @@ await server.spin()
 | `ping_daemon` | Check Daemon health |
 | `describe_topic_schema` | Get Topic message JSON Schema |
 
+## BusMailboxComponent (Composable Mailbox)
+
+Extracted from BusMCPServer — a standalone mailbox component that can be embedded in any node. Provides dual access: MCP tools for AI agents, Python API for in-process consumers.
+
+```python
+from tagentacle_py_core import LifecycleNode
+from tagentacle_py_mcp import MCPServerComponent, BusMailboxComponent
+
+class MyAgentNode(LifecycleNode):
+    def __init__(self):
+        super().__init__("my_agent")
+        self.mcp_server = MCPServerComponent("my_agent", mcp_port=8100)
+        self.mailbox = BusMailboxComponent(self, self.mcp_server.mcp)
+```
+
+### MCP Tools (AI agent access)
+
+| Tool | Description |
+|------|-------------|
+| `subscribe_topic` | Subscribe with level (followup/collect/silent) |
+| `unsubscribe_topic` | Unsubscribe from a topic |
+| `set_subscription_level` | Change level of existing subscription |
+| `poll_messages` | Drain buffered messages |
+
+### MCP Resources
+
+| URI | Description |
+|-----|-------------|
+| `bus://mailbox` | All pending messages (JSON) |
+| `bus://mailbox/{topic}` | Messages for a specific topic |
+
+### Python API (in-process access)
+
+```python
+triggered = mailbox.push(topic, msg)  # buffer + check if should trigger
+msgs = mailbox.drain()                # drain all messages
+count = mailbox.pending               # total pending count
+count = mailbox.pending_for(topic)    # pending for a specific topic
+topics = mailbox.topics               # set of subscribed topics
+level = mailbox.get_level(topic)      # current subscription level
+```
+
+> **Future**: BusMailboxComponent will be renamed to **InboxMCP** as part of Q27 SDK restructuring. See [ALIGNMENT_ANALYSIS Q26](https://github.com/Tagentacle/python-sdk-mcp/issues/2).
+
 ## TACL — Tagentacle Access Control Layer
 
 JWT-based MCP tool-level authentication. TACL core has moved to [`tagentacle-py-tacl`](https://github.com/Tagentacle/python-sdk-tacl); auth primitives are re-exported here for backward compatibility.
